@@ -86,15 +86,27 @@ public class CSVProcessorController {
         StatisticsSummary summary = new StatisticsSummary();
         java.util.Iterator<CSVRecord> iterator = csvReader.getRecordIterator(filePath);
         
+        long processedRecords = 0;
+        long startTime = System.currentTimeMillis();
+        
         while (iterator.hasNext()) {
             CSVRecord record = iterator.next();
             summary.incrementRecordCount();
+            processedRecords++;
             
             for (String column : numericColumns) {
                 Double value = record.getNumericValue(column);
                 if (value != null) {
                     summary.addColumnValue(column, value);
                 }
+            }
+            
+            // Progreso cada 2 millones de registros
+            if (processedRecords % 2000000 == 0) {
+                long elapsed = System.currentTimeMillis() - startTime;
+                double rate = processedRecords / (elapsed / 1000.0);
+                System.out.printf("[SECUENCIAL] %,d registros | %,d ms | %.0f reg/seg\n", 
+                                processedRecords, elapsed, rate);
             }
         }
         
@@ -111,13 +123,26 @@ public class CSVProcessorController {
         final int CHUNK_SIZE = 50000; // 50K registros por chunk
         List<CSVRecord> chunk = new ArrayList<CSVRecord>();
         
+        long processedRecords = 0;
+        long startTime = System.currentTimeMillis();
+        
         while (iterator.hasNext()) {
             chunk.add(iterator.next());
             
             if (chunk.size() >= CHUNK_SIZE) {
                 StatisticsSummary chunkSummary = concurrentProcessor.processData(chunk, numericColumns);
                 mergeResults(finalSummary, chunkSummary);
+                
+                processedRecords += chunk.size();
                 chunk.clear();
+                
+                // Progreso cada 2 millones de registros
+                if (processedRecords % 2000000 == 0) {
+                    long elapsed = System.currentTimeMillis() - startTime;
+                    double rate = processedRecords / (elapsed / 1000.0);
+                    System.out.printf("[CONCURRENTE] %,d registros | %,d ms | %.0f reg/seg\n", 
+                                    processedRecords, elapsed, rate);
+                }
             }
         }
         
