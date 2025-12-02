@@ -17,8 +17,8 @@ if [ ! -d "build" ] || [ "src" -nt "build" ]; then
     echo "✓ Compilación exitosa"
 fi
 
-# Configuración JVM optimizada
-JAVA_OPTS="-Xmx4g -Xms2g -XX:+UseG1GC"
+# Configuración JVM optimizada para concurrencia
+JAVA_OPTS="-Xmx6g -Xms3g -XX:+UseG1GC -XX:MaxGCPauseMillis=100 -XX:+UnlockExperimentalVMOptions -XX:+UseStringDeduplication -XX:G1HeapRegionSize=16m -XX:+UseCompressedOops"
 
 echo ""
 echo "Ejecutando procesador CSV..."

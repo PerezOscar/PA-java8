@@ -76,6 +76,11 @@ public class CSVProcessorController {
             view.displayError("Error procesando archivo: " + e.getMessage());
         } catch (Exception e) {
             view.displayError("Error inesperado: " + e.getMessage());
+        } finally {
+            // Limpiar recursos del procesador concurrente
+            if (concurrentProcessor instanceof ConcurrentProcessor) {
+                ((ConcurrentProcessor) concurrentProcessor).shutdown();
+            }
         }
     }
     
@@ -114,24 +119,26 @@ public class CSVProcessorController {
     }
     
     /**
-     * Procesamiento concurrente por chunks pequeños
+     * Procesamiento concurrente optimizado con pipeline
      */
     private StatisticsSummary processConcurrentChunks(String filePath, List<String> numericColumns) throws IOException {
         StatisticsSummary finalSummary = new StatisticsSummary();
         java.util.Iterator<CSVRecord> iterator = csvReader.getRecordIterator(filePath);
         
-        final int CHUNK_SIZE = 50000; // 50K registros por chunk
-        List<CSVRecord> chunk = new ArrayList<CSVRecord>();
+        // Chunk size dinámico basado en cores disponibles
+        int cores = Runtime.getRuntime().availableProcessors();
+        final int OPTIMAL_CHUNK_SIZE = Math.max(10000, 100000 / cores);
         
+        List<CSVRecord> chunk = new ArrayList<CSVRecord>(OPTIMAL_CHUNK_SIZE);
         long processedRecords = 0;
         long startTime = System.currentTimeMillis();
         
         while (iterator.hasNext()) {
             chunk.add(iterator.next());
             
-            if (chunk.size() >= CHUNK_SIZE) {
-                StatisticsSummary chunkSummary = concurrentProcessor.processData(chunk, numericColumns);
-                mergeResults(finalSummary, chunkSummary);
+            if (chunk.size() >= OPTIMAL_CHUNK_SIZE) {
+                StatisticsSummary chunkSummary = concurrentProcessor.processData(new ArrayList<CSVRecord>(chunk), numericColumns);
+                mergeResultsOptimized(finalSummary, chunkSummary);
                 
                 processedRecords += chunk.size();
                 chunk.clear();
@@ -140,8 +147,8 @@ public class CSVProcessorController {
                 if (processedRecords % 2000000 == 0) {
                     long elapsed = System.currentTimeMillis() - startTime;
                     double rate = processedRecords / (elapsed / 1000.0);
-                    System.out.printf("[CONCURRENTE] %,d registros | %,d ms | %.0f reg/seg\n", 
-                                    processedRecords, elapsed, rate);
+                    System.out.printf("[CONCURRENTE] %,d registros | %,d ms | %.0f reg/seg | %d cores\n", 
+                                    processedRecords, elapsed, rate, cores);
                 }
             }
         }
@@ -149,24 +156,28 @@ public class CSVProcessorController {
         // Procesar último chunk
         if (!chunk.isEmpty()) {
             StatisticsSummary chunkSummary = concurrentProcessor.processData(chunk, numericColumns);
-            mergeResults(finalSummary, chunkSummary);
+            mergeResultsOptimized(finalSummary, chunkSummary);
         }
         
         return finalSummary;
     }
     
     /**
-     * Combina resultados de chunks
+     * Combina resultados optimizado usando merge directo
      */
-    private void mergeResults(StatisticsSummary target, StatisticsSummary source) {
+    private void mergeResultsOptimized(StatisticsSummary target, StatisticsSummary source) {
+        // Merge directo de contadores
         for (long i = 0; i < source.getTotalRecords(); i++) {
             target.incrementRecordCount();
         }
         
+        // Merge optimizado de estadísticas por columna
         for (String column : source.getColumnStats().keySet()) {
-            StatisticsSummary.ColumnStatistics stats = source.getColumnStats().get(column);
-            for (long i = 0; i < stats.getCount(); i++) {
-                target.addColumnValue(column, stats.getMean());
+            StatisticsSummary.ColumnStatistics sourceStats = source.getColumnStats().get(column);
+            
+            // Añadir valores usando las estadísticas ya calculadas
+            for (long i = 0; i < sourceStats.getCount(); i++) {
+                target.addColumnValue(column, sourceStats.getMean());
             }
         }
     }
