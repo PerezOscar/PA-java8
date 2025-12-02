@@ -1,5 +1,7 @@
 import controller.CSVProcessorController;
 import service.ICSVProcessor;
+import service.CSVReaderImpl;
+import utils.ColumnSelector;
 import java.util.Arrays;
 import java.util.List;
 import java.util.ArrayList;
@@ -22,10 +24,23 @@ public class Main {
         
         String fileName = args[0];
         String filePath = "data/" + fileName;
-        List<String> numericColumns = parseNumericColumns(args);
         
-        // Mostrar configuración
-        showConfiguration(filePath, numericColumns);
+        // Leer headers y mostrar columnas detectadas
+        List<String> headers = readHeaders(filePath);
+        if (headers.isEmpty()) {
+            System.err.println("Error: No se pudieron leer las columnas del archivo.");
+            return;
+        }
+        
+        displayDetectedColumns(headers);
+        
+        // Selección de columnas
+        List<String> numericColumns;
+        if (args.length > 1) {
+            numericColumns = parseNumericColumns(args);
+        } else {
+            numericColumns = ColumnSelector.selectColumns(headers);
+        }
         
         // Crear controlador y procesar
         try {
@@ -104,6 +119,35 @@ public class Main {
             for (String column : numericColumns) {
                 System.out.println("    - " + column);
             }
+        }
+        System.out.println();
+    }
+    
+    /**
+     * Lee headers del archivo CSV
+     */
+    private static List<String> readHeaders(String filePath) {
+        try {
+            ICSVProcessor reader = new CSVReaderImpl();
+            return reader.readHeaders(filePath);
+        } catch (Exception e) {
+            System.err.println("Error leyendo headers: " + e.getMessage());
+            return new ArrayList<String>();
+        }
+    }
+    
+    /**
+     * Muestra las columnas detectadas en el archivo
+     */
+    private static void displayDetectedColumns(List<String> headers) {
+        System.out.println("========================================");
+        System.out.println("COLUMNAS DETECTADAS EN EL ARCHIVO CSV");
+        System.out.println("========================================");
+        System.out.println("Total de columnas: " + headers.size());
+        System.out.println("----------------------------------------");
+        
+        for (int i = 0; i < headers.size(); i++) {
+            System.out.printf("%3d. %s\n", (i + 1), headers.get(i));
         }
         System.out.println();
     }
