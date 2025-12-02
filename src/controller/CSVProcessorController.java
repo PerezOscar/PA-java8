@@ -48,17 +48,14 @@ public class CSVProcessorController {
             
             view.displayProcessingStart(filePath, numericColumns);
             
-            // Cargar datos para procesamiento
-            List<CSVRecord> allRecords = loadAllRecords(filePath);
-            
-            // Procesamiento secuencial
+            // Procesamiento secuencial streaming
             long startTime = System.currentTimeMillis();
-            StatisticsSummary sequentialSummary = sequentialProcessor.processData(allRecords, numericColumns);
+            StatisticsSummary sequentialSummary = processSequentialStreaming(filePath, numericColumns);
             long sequentialTime = System.currentTimeMillis() - startTime;
             
-            // Procesamiento concurrente
+            // Procesamiento concurrente por chunks
             startTime = System.currentTimeMillis();
-            StatisticsSummary concurrentSummary = concurrentProcessor.processData(allRecords, numericColumns);
+            StatisticsSummary concurrentSummary = processConcurrentChunks(filePath, numericColumns);
             long concurrentTime = System.currentTimeMillis() - startTime;
             
             // Mostrar resultados
@@ -83,21 +80,70 @@ public class CSVProcessorController {
     }
     
     /**
-     * Carga todos los registros en memoria para procesamiento
+     * Procesamiento secuencial streaming sin cargar todo en memoria
      */
-    private List<CSVRecord> loadAllRecords(String filePath) throws IOException {
-        List<CSVRecord> records = new ArrayList<CSVRecord>();
+    private StatisticsSummary processSequentialStreaming(String filePath, List<String> numericColumns) throws IOException {
+        StatisticsSummary summary = new StatisticsSummary();
+        java.util.Iterator<CSVRecord> iterator = csvReader.getRecordIterator(filePath);
         
-        try {
-            java.util.Iterator<CSVRecord> iterator = csvReader.getRecordIterator(filePath);
-            while (iterator.hasNext()) {
-                records.add(iterator.next());
+        while (iterator.hasNext()) {
+            CSVRecord record = iterator.next();
+            summary.incrementRecordCount();
+            
+            for (String column : numericColumns) {
+                Double value = record.getNumericValue(column);
+                if (value != null) {
+                    summary.addColumnValue(column, value);
+                }
             }
-        } catch (IOException e) {
-            throw new IOException("Error cargando registros: " + e.getMessage());
         }
         
-        return records;
+        return summary;
+    }
+    
+    /**
+     * Procesamiento concurrente por chunks pequeños
+     */
+    private StatisticsSummary processConcurrentChunks(String filePath, List<String> numericColumns) throws IOException {
+        StatisticsSummary finalSummary = new StatisticsSummary();
+        java.util.Iterator<CSVRecord> iterator = csvReader.getRecordIterator(filePath);
+        
+        final int CHUNK_SIZE = 50000; // 50K registros por chunk
+        List<CSVRecord> chunk = new ArrayList<CSVRecord>();
+        
+        while (iterator.hasNext()) {
+            chunk.add(iterator.next());
+            
+            if (chunk.size() >= CHUNK_SIZE) {
+                StatisticsSummary chunkSummary = concurrentProcessor.processData(chunk, numericColumns);
+                mergeResults(finalSummary, chunkSummary);
+                chunk.clear();
+            }
+        }
+        
+        // Procesar último chunk
+        if (!chunk.isEmpty()) {
+            StatisticsSummary chunkSummary = concurrentProcessor.processData(chunk, numericColumns);
+            mergeResults(finalSummary, chunkSummary);
+        }
+        
+        return finalSummary;
+    }
+    
+    /**
+     * Combina resultados de chunks
+     */
+    private void mergeResults(StatisticsSummary target, StatisticsSummary source) {
+        for (long i = 0; i < source.getTotalRecords(); i++) {
+            target.incrementRecordCount();
+        }
+        
+        for (String column : source.getColumnStats().keySet()) {
+            StatisticsSummary.ColumnStatistics stats = source.getColumnStats().get(column);
+            for (long i = 0; i < stats.getCount(); i++) {
+                target.addColumnValue(column, stats.getMean());
+            }
+        }
     }
     
     /**
